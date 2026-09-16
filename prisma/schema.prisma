@@ -1,0 +1,133 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  ADMIN
+  PLAYER
+}
+
+enum Difficulty {
+  EASY
+  MEDIUM
+}
+
+enum PuzzleStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum AttemptStatus {
+  IN_PROGRESS
+  SOLVED
+  FAILED
+}
+
+model User {
+  id                 String    @id @default(cuid())
+  username           String
+  usernameLower      String    @unique
+  displayName        String?
+  passwordHash       String
+  role               Role      @default(PLAYER)
+  isActive           Boolean   @default(true)
+  mustChangePassword Boolean   @default(true)
+  createdById        String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  sessions           Session[]
+  attempts           Attempt[]
+}
+
+model Session {
+  id         String    @id @default(cuid())
+  tokenHash  String    @unique
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt  DateTime
+  lastSeenAt DateTime  @default(now())
+  revokedAt  DateTime?
+  userAgent  String?
+  createdAt  DateTime  @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Puzzle {
+  id               String          @id @default(cuid())
+  code             String          @unique
+  title            String
+  size             Int
+  difficulty       Difficulty
+  seed             String
+  generatorVersion Int             @default(1)
+  layout           Json
+  cast             Json
+  clues            Json
+  clueCount        Int
+  difficultyScore  Int
+  status           PuzzleStatus    @default(DRAFT)
+  publishedAt      DateTime?
+  createdAt        DateTime        @default(now())
+  solution         PuzzleSolution?
+  attempts         Attempt[]
+
+  @@index([status, difficulty])
+}
+
+model PuzzleSolution {
+  puzzleId       String   @id
+  puzzle         Puzzle   @relation(fields: [puzzleId], references: [id], onDelete: Cascade)
+  placements     Json
+  victimCell     Int
+  murdererId     String
+  deductionTrace Json
+}
+
+model Attempt {
+  id               String        @id @default(cuid())
+  userId           String
+  user             User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  puzzleId         String
+  puzzle           Puzzle        @relation(fields: [puzzleId], references: [id], onDelete: Cascade)
+  status           AttemptStatus @default(IN_PROGRESS)
+  placements       Json          @default("[]")
+  accusedSuspectId String?
+  wrongAccusations Int           @default(0)
+  hintsUsed        Int           @default(0)
+  startedAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  completedAt      DateTime?
+
+  @@unique([userId, puzzleId])
+  @@index([userId, status])
+}
+
+model LoginAttempt {
+  id            String   @id @default(cuid())
+  usernameLower String
+  ipHash        String
+  succeeded     Boolean
+  createdAt     DateTime @default(now())
+
+  @@index([usernameLower, createdAt])
+  @@index([ipHash, createdAt])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String?
+  action     String
+  targetType String
+  targetId   String
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+}

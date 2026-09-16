@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Murdoku</string>
+    <string name="title_activity_main">Murdoku</string>
+    <string name="package_name">app.murdoku.game</string>
+    <string name="custom_url_scheme">app.murdoku.game</string>
+</resources>
