@@ -4,11 +4,17 @@ import type { FloorPlan, Person } from "@/engine/types";
 import { roomVisual, suspectTokenColor } from "@/lib/furnitureIcons";
 import { FurnitureIcon } from "./FurnitureIcon";
 
+interface Placement {
+  cell: number;
+  confirmed: boolean;
+}
+
 interface Props {
   layout: FloorPlan;
   suspects: Person[];
-  placements: Record<string, number>;
+  placements: Record<string, Placement>;
   blockedCells: Set<number>;
+  autoBlockedCells: Set<number>;
   onCellClick: (cellIndex: number) => void;
 }
 
@@ -29,11 +35,11 @@ function wallStyle(layout: FloorPlan, cell: { row: number; col: number; roomId: 
   };
 }
 
-export function GridBoard({ layout, suspects, placements, blockedCells, onCellClick }: Props) {
-  const occupantByCell = new Map<number, { person: Person; index: number }>();
+export function GridBoard({ layout, suspects, placements, blockedCells, autoBlockedCells, onCellClick }: Props) {
+  const occupantByCell = new Map<number, { person: Person; index: number; confirmed: boolean }>();
   suspects.forEach((person, index) => {
-    const cell = placements[person.id];
-    if (cell !== undefined) occupantByCell.set(cell, { person, index });
+    const p = placements[person.id];
+    if (p) occupantByCell.set(p.cell, { person, index, confirmed: p.confirmed });
   });
 
   const roomLabelCell = new Map<number, number>(); // roomId -> first (top-left-most) cell index
@@ -50,7 +56,8 @@ export function GridBoard({ layout, suspects, placements, blockedCells, onCellCl
       {layout.cells.map((cell) => {
         const occupant = occupantByCell.get(cell.index);
         const visual = roomVisual(cell.roomId);
-        const isBlocked = blockedCells.has(cell.index);
+        const isManuallyBlocked = blockedCells.has(cell.index);
+        const isAutoBlocked = !isManuallyBlocked && cell.isSeat && autoBlockedCells.has(cell.index);
         const room = layout.rooms.find((r) => r.id === cell.roomId)!;
         const showLabel = roomLabelCell.get(cell.roomId) === cell.index;
 
@@ -74,15 +81,24 @@ export function GridBoard({ layout, suspects, placements, blockedCells, onCellCl
 
             <FurnitureIcon id={cell.furnitureId} className={`h-5 w-5 ${visual.icon}`} />
 
-            {isBlocked && !occupant && (
-              <svg viewBox="0 0 24 24" className="absolute inset-0 m-auto h-6 w-6 text-red-500/90" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round">
+            {!occupant && (isManuallyBlocked || isAutoBlocked) && (
+              <svg
+                viewBox="0 0 24 24"
+                className={`absolute inset-0 m-auto h-6 w-6 ${isManuallyBlocked ? "text-red-500/90" : "text-neutral-400/50"}`}
+                stroke="currentColor"
+                strokeWidth={2.5}
+                strokeLinecap="round"
+              >
                 <path d="M6 6l12 12M18 6 6 18" />
               </svg>
             )}
 
             {occupant && (
               <span
-                className={`absolute inset-1 flex items-center justify-center rounded-full border-2 border-white/80 text-sm font-bold text-white shadow-lg ${suspectTokenColor(occupant.index)}`}
+                className={`absolute inset-1 flex items-center justify-center rounded-full text-sm font-bold text-white shadow-lg ${suspectTokenColor(occupant.index)} ${
+                  occupant.confirmed ? "border-2 border-white/80" : "border-2 border-dashed border-white/70 opacity-70"
+                }`}
+                title={occupant.confirmed ? "Confirmado" : "Hipótese"}
               >
                 {occupant.person.name.slice(0, 2)}
               </span>

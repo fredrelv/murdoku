@@ -5,7 +5,7 @@ import { suspectTokenColor } from "@/lib/furnitureIcons";
 
 interface Props {
   suspects: Person[];
-  placements: Record<string, number>;
+  placements: Record<string, { cell: number; confirmed: boolean }>;
   activeId: string | null;
   onSelect: (id: string) => void;
 }

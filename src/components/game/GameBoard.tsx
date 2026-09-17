@@ -27,13 +27,23 @@ interface AccuseResponse {
 
 const AUTOSAVE_DELAY_MS = 1000;
 
-function toMap(list: { suspectId: string; cell: number }[]): Record<string, number> {
-  return Object.fromEntries(list.map((p) => [p.suspectId, p.cell]));
+interface Placement {
+  cell: number;
+  /** Hypothesis placements are a "testing a guess" scratch state — they
+   * still occupy the cell like any other placement, but don't drive the
+   * automatic row/column elimination overlay (see autoBlockedCells below),
+   * since a wrong hypothesis shouldn't mislead the player elsewhere. */
+  confirmed: boolean;
+}
+
+function toMap(list: { suspectId: string; cell: number }[]): Record<string, Placement> {
+  return Object.fromEntries(list.map((p) => [p.suspectId, { cell: p.cell, confirmed: true }]));
 }
 
 export function GameBoard({ puzzle, initialAttempt }: { puzzle: PlayerPuzzle; initialAttempt: AttemptState }) {
-  const [placements, setPlacements] = useState<Record<string, number>>(toMap(initialAttempt.placements));
+  const [placements, setPlacements] = useState<Record<string, Placement>>(toMap(initialAttempt.placements));
   const [blockedCells, setBlockedCells] = useState<Set<number>>(new Set());
+  const [placementMode, setPlacementMode] = useState<"confirmed" | "hypothesis">("confirmed");
   const [activeSuspect, setActiveSuspect] = useState<string | null>(null);
   const [status, setStatus] = useState(initialAttempt.status);
   const [accusing, setAccusing] = useState(false);
@@ -50,7 +60,10 @@ export function GameBoard({ puzzle, initialAttempt }: { puzzle: PlayerPuzzle; in
     if (solved) return;
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
-      const list = Object.entries(placements).map(([suspectId, cell]) => ({ suspectId, cell }));
+      // The server only ever needs to know the final cell per suspect — the
+      // confirmed/hypothesis distinction is a local scratch aid, same as
+      // the X marks, and is never part of the puzzle's real submission.
+      const list = Object.entries(placements).map(([suspectId, p]) => ({ suspectId, cell: p.cell }));
       api.patch(`/api/attempts/${initialAttempt.id}`, { placements: list }).catch(() => {
         // Autosave is best-effort; the player's local state is still correct.
       });
@@ -63,9 +76,31 @@ export function GameBoard({ puzzle, initialAttempt }: { puzzle: PlayerPuzzle; in
 
   const occupiedByOther = useMemo(() => {
     const map = new Map<number, string>();
-    for (const [suspectId, cell] of Object.entries(placements)) map.set(cell, suspectId);
+    for (const [suspectId, p] of Object.entries(placements)) map.set(p.cell, suspectId);
     return map;
   }, [placements]);
+
+  // Sudoku rule made visible: once a suspect is confirmed at (row, col), no
+  // one else can use that row or that column, so grey those seats out
+  // automatically instead of making the player mark them by hand.
+  const autoBlockedCells = useMemo(() => {
+    const size = puzzle.layout.size;
+    const blocked = new Set<number>();
+    for (const p of Object.values(placements)) {
+      if (!p.confirmed) continue;
+      const row = Math.floor(p.cell / size);
+      const col = p.cell % size;
+      for (let c = 0; c < size; c++) {
+        const idx = row * size + c;
+        if (idx !== p.cell) blocked.add(idx);
+      }
+      for (let r = 0; r < size; r++) {
+        const idx = r * size + col;
+        if (idx !== p.cell) blocked.add(idx);
+      }
+    }
+    return blocked;
+  }, [placements, puzzle.layout.size]);
 
   function handleCellClick(cell: number) {
     if (solved) return;
@@ -76,9 +111,9 @@ export function GameBoard({ puzzle, initialAttempt }: { puzzle: PlayerPuzzle; in
       setPlacements((prev) => {
         const next = { ...prev };
         for (const key of Object.keys(next)) {
-          if (next[key] === cell) delete next[key];
+          if (next[key]!.cell === cell) delete next[key];
         }
-        next[activeSuspect] = cell;
+        next[activeSuspect] = { cell, confirmed: placementMode === "confirmed" };
         return next;
       });
       setBlockedCells((prev) => {
@@ -116,7 +151,7 @@ export function GameBoard({ puzzle, initialAttempt }: { puzzle: PlayerPuzzle; in
     setError(null);
     setAccusing(true);
     try {
-      const list = Object.entries(placements).map(([suspectId, cell]) => ({ suspectId, cell }));
+      const list = Object.entries(placements).map(([suspectId, p]) => ({ suspectId, cell: p.cell }));
       const result = await api.post<AccuseResponse>(`/api/attempts/${initialAttempt.id}/accuse`, {
         placements: list,
         accusedSuspectId: accusedId,
@@ -166,18 +201,42 @@ export function GameBoard({ puzzle, initialAttempt }: { puzzle: PlayerPuzzle; in
           suspects={puzzle.suspects}
           placements={placements}
           blockedCells={blockedCells}
+          autoBlockedCells={autoBlockedCells}
           onCellClick={handleCellClick}
         />
-        <SuspectTray
-          suspects={puzzle.suspects}
-          placements={placements}
-          activeId={activeSuspect}
-          onSelect={(id) => setActiveSuspect((cur) => (cur === id ? null : id))}
-        />
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <SuspectTray
+            suspects={puzzle.suspects}
+            placements={placements}
+            activeId={activeSuspect}
+            onSelect={(id) => setActiveSuspect((cur) => (cur === id ? null : id))}
+          />
+          <div className="flex items-center gap-1 rounded-full border border-neutral-700 bg-neutral-900 p-1 text-xs">
+            <button
+              type="button"
+              onClick={() => setPlacementMode("hypothesis")}
+              className={`rounded-full px-3 py-1 font-medium transition ${
+                placementMode === "hypothesis" ? "bg-sky-500 text-neutral-950" : "text-neutral-400 hover:text-neutral-200"
+              }`}
+            >
+              Hipótese
+            </button>
+            <button
+              type="button"
+              onClick={() => setPlacementMode("confirmed")}
+              className={`rounded-full px-3 py-1 font-medium transition ${
+                placementMode === "confirmed" ? "bg-emerald-500 text-neutral-950" : "text-neutral-400 hover:text-neutral-200"
+              }`}
+            >
+              Confirmado
+            </button>
+          </div>
+        </div>
         <p className="text-xs text-neutral-500">
-          Seleciona um suspeito e depois clica numa cadeira/cama/tapete livre para o colocar. Clica numa casa
-          ocupada para o remover. Sem suspeito selecionado, clicar numa casa vazia marca/desmarca uma cruz
-          (nota para eliminar hipóteses).
+          Seleciona um suspeito e depois clica numa cadeira/cama/tapete livre para o colocar (em modo
+          &ldquo;Hipótese&rdquo; o peão fica tracejado — testa sem compromisso). Clica numa casa ocupada para o remover. Sem suspeito
+          selecionado, clicar numa casa vazia marca/desmarca uma cruz. Colocar alguém confirmado risca
+          automaticamente o resto da linha e coluna (ninguém mais pode estar lá).
         </p>
 
         {hints.length > 0 && (
