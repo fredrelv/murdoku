@@ -1,44 +1,90 @@
 "use client";
 
 import type { FloorPlan, Person } from "@/engine/types";
-import { FURNITURE_ICON, roomColor } from "@/lib/furnitureIcons";
+import { roomVisual, suspectTokenColor } from "@/lib/furnitureIcons";
+import { FurnitureIcon } from "./FurnitureIcon";
 
 interface Props {
   layout: FloorPlan;
   suspects: Person[];
   placements: Record<string, number>;
+  blockedCells: Set<number>;
   onCellClick: (cellIndex: number) => void;
 }
 
-export function GridBoard({ layout, suspects, placements, onCellClick }: Props) {
-  const occupantByCell = new Map<number, Person>();
-  for (const suspect of suspects) {
-    const cell = placements[suspect.id];
-    if (cell !== undefined) occupantByCell.set(cell, suspect);
+const WALL = "3px solid #1c1917"; // stone-900: reads as a room partition
+const NO_WALL = "1px solid transparent";
+
+/** Only draws a wall between two cells when they belong to different rooms — this is what makes procedurally-shaped rooms read as a connected floor plan instead of a flat grid of tiles. */
+function wallStyle(layout: FloorPlan, cell: { row: number; col: number; roomId: number }) {
+  const { size, cells } = layout;
+  const neighbourRoom = (row: number, col: number) =>
+    row < 0 || row >= size || col < 0 || col >= size ? null : cells[row * size + col]!.roomId;
+
+  return {
+    borderTop: neighbourRoom(cell.row - 1, cell.col) === cell.roomId ? NO_WALL : WALL,
+    borderBottom: neighbourRoom(cell.row + 1, cell.col) === cell.roomId ? NO_WALL : WALL,
+    borderLeft: neighbourRoom(cell.row, cell.col - 1) === cell.roomId ? NO_WALL : WALL,
+    borderRight: neighbourRoom(cell.row, cell.col + 1) === cell.roomId ? NO_WALL : WALL,
+  };
+}
+
+export function GridBoard({ layout, suspects, placements, blockedCells, onCellClick }: Props) {
+  const occupantByCell = new Map<number, { person: Person; index: number }>();
+  suspects.forEach((person, index) => {
+    const cell = placements[person.id];
+    if (cell !== undefined) occupantByCell.set(cell, { person, index });
+  });
+
+  const roomLabelCell = new Map<number, number>(); // roomId -> first (top-left-most) cell index
+  for (const room of layout.rooms) {
+    const first = room.cellIndices.reduce((a, b) => (a < b ? a : b));
+    roomLabelCell.set(room.id, first);
   }
 
   return (
     <div
-      className="grid gap-1 rounded-xl border border-neutral-800 bg-neutral-950 p-2"
-      style={{ gridTemplateColumns: `repeat(${layout.size}, minmax(0, 1fr))` }}
+      className="grid overflow-hidden rounded-2xl p-1 shadow-[0_0_0_6px_rgba(0,0,0,0.4),0_0_0_8px_rgba(180,140,80,0.35)]"
+      style={{ gridTemplateColumns: `repeat(${layout.size}, minmax(0, 1fr))`, background: "#0c0a09" }}
     >
       {layout.cells.map((cell) => {
         const occupant = occupantByCell.get(cell.index);
+        const visual = roomVisual(cell.roomId);
+        const isBlocked = blockedCells.has(cell.index);
+        const room = layout.rooms.find((r) => r.id === cell.roomId)!;
+        const showLabel = roomLabelCell.get(cell.roomId) === cell.index;
+
         return (
           <button
             key={cell.index}
             type="button"
             onClick={() => onCellClick(cell.index)}
             disabled={!cell.isSeat}
-            className={`relative flex aspect-square min-w-11 flex-col items-center justify-center rounded-lg border text-xs transition ${roomColor(cell.roomId)} ${
-              cell.isSeat ? "cursor-pointer hover:brightness-125" : "opacity-60"
+            style={wallStyle(layout, cell)}
+            className={`relative flex aspect-square min-w-10 flex-col items-center justify-center text-xs transition ${visual.bg} ${
+              cell.isSeat ? "cursor-pointer hover:brightness-125" : "opacity-70"
             }`}
             title={cell.furnitureId}
           >
-            <span className="text-lg leading-none">{FURNITURE_ICON[cell.furnitureId]}</span>
+            {showLabel && (
+              <span className={`pointer-events-none absolute left-1 top-0.5 text-[8px] font-semibold uppercase tracking-wide ${visual.label}`}>
+                {room.name}
+              </span>
+            )}
+
+            <FurnitureIcon id={cell.furnitureId} className={`h-5 w-5 ${visual.icon}`} />
+
+            {isBlocked && !occupant && (
+              <svg viewBox="0 0 24 24" className="absolute inset-0 m-auto h-6 w-6 text-red-500/90" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round">
+                <path d="M6 6l12 12M18 6 6 18" />
+              </svg>
+            )}
+
             {occupant && (
-              <span className="absolute inset-0 flex items-center justify-center rounded-lg bg-amber-500/90 text-sm font-bold text-neutral-950">
-                {occupant.name.slice(0, 2)}
+              <span
+                className={`absolute inset-1 flex items-center justify-center rounded-full border-2 border-white/80 text-sm font-bold text-white shadow-lg ${suspectTokenColor(occupant.index)}`}
+              >
+                {occupant.person.name.slice(0, 2)}
               </span>
             )}
           </button>

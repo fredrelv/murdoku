@@ -33,6 +33,7 @@ function toMap(list: { suspectId: string; cell: number }[]): Record<string, numb
 
 export function GameBoard({ puzzle, initialAttempt }: { puzzle: PlayerPuzzle; initialAttempt: AttemptState }) {
   const [placements, setPlacements] = useState<Record<string, number>>(toMap(initialAttempt.placements));
+  const [blockedCells, setBlockedCells] = useState<Set<number>>(new Set());
   const [activeSuspect, setActiveSuspect] = useState<string | null>(null);
   const [status, setStatus] = useState(initialAttempt.status);
   const [accusing, setAccusing] = useState(false);
@@ -80,6 +81,12 @@ export function GameBoard({ puzzle, initialAttempt }: { puzzle: PlayerPuzzle; in
         next[activeSuspect] = cell;
         return next;
       });
+      setBlockedCells((prev) => {
+        if (!prev.has(cell)) return prev;
+        const next = new Set(prev);
+        next.delete(cell);
+        return next;
+      });
       setActiveSuspect(null);
       return;
     }
@@ -91,7 +98,18 @@ export function GameBoard({ puzzle, initialAttempt }: { puzzle: PlayerPuzzle; in
         delete next[occupant];
         return next;
       });
+      return;
     }
+
+    // No suspect selected and the cell is empty: toggle a blocking "X" mark
+    // — a scratch note ("this seat can't be the answer"), never sent to the
+    // server, exactly like pencil marks in the physical book.
+    setBlockedCells((prev) => {
+      const next = new Set(prev);
+      if (next.has(cell)) next.delete(cell);
+      else next.add(cell);
+      return next;
+    });
   }
 
   async function handleAccuse() {
@@ -129,6 +147,7 @@ export function GameBoard({ puzzle, initialAttempt }: { puzzle: PlayerPuzzle; in
     try {
       await api.post(`/api/attempts/${initialAttempt.id}/reset`);
       setPlacements({});
+      setBlockedCells(new Set());
       setStatus("IN_PROGRESS");
       setVerdict(null);
       setHints([]);
@@ -146,6 +165,7 @@ export function GameBoard({ puzzle, initialAttempt }: { puzzle: PlayerPuzzle; in
           layout={puzzle.layout}
           suspects={puzzle.suspects}
           placements={placements}
+          blockedCells={blockedCells}
           onCellClick={handleCellClick}
         />
         <SuspectTray
@@ -156,7 +176,8 @@ export function GameBoard({ puzzle, initialAttempt }: { puzzle: PlayerPuzzle; in
         />
         <p className="text-xs text-neutral-500">
           Seleciona um suspeito e depois clica numa cadeira/cama/tapete livre para o colocar. Clica numa casa
-          ocupada para o remover.
+          ocupada para o remover. Sem suspeito selecionado, clicar numa casa vazia marca/desmarca uma cruz
+          (nota para eliminar hipóteses).
         </p>
 
         {hints.length > 0 && (
